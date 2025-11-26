@@ -7,7 +7,7 @@ import os
 st.set_page_config(
     page_title="Spotify Liked Songs to Playlist",
     page_icon="🎵",
-    layout="centered"
+    layout="wide"
 )
 
 # Spotify color theme
@@ -26,22 +26,55 @@ st.markdown("""
         background-color: #000000;
     }
     
-    /* Button styling */
-    .stButton > button {
+    /* Primary Button styling */
+    .stButton > button[kind="primary"] {
         background-color: #1DB954 !important;
-        color: #000000 !important;
-        border-radius: 500px !important;
-        font-weight: 700 !important;
+        color: #ffffff !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
         border: none !important;
-        padding: 12px 32px !important;
+        padding: 10px 24px !important;
         font-size: 14px !important;
         transition: all 0.2s ease !important;
-        letter-spacing: 1.5px !important;
-        text-transform: uppercase !important;
+        white-space: nowrap !important;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background-color: #1ed760 !important;
+        transform: scale(1.02) !important;
+    }
+    
+    /* Secondary Button styling */
+    .stButton > button[kind="secondary"] {
+        background-color: #282828 !important;
+        color: #ffffff !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        border: 1px solid #535353 !important;
+        padding: 10px 24px !important;
+        font-size: 14px !important;
+        transition: all 0.2s ease !important;
+        white-space: nowrap !important;
+    }
+    .stButton > button[kind="secondary"]:hover {
+        background-color: #3e3e3e !important;
+        border-color: #b3b3b3 !important;
+    }
+    
+    /* Default Button styling */
+    .stButton > button {
+        background-color: #282828 !important;
+        color: #ffffff !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        border: 1px solid #535353 !important;
+        padding: 10px 24px !important;
+        font-size: 14px !important;
+        transition: all 0.2s ease !important;
+        white-space: nowrap !important;
     }
     .stButton > button:hover {
-        background-color: #1ed760 !important;
-        transform: scale(1.04) !important;
+        background-color: #3e3e3e !important;
+        border-color: #b3b3b3 !important;
     }
     
     /* Text input - complete unified styling */
@@ -189,6 +222,12 @@ if 'sp' not in st.session_state:
     st.session_state.sp = None
 if 'liked_songs' not in st.session_state:
     st.session_state.liked_songs = []
+if 'selected_songs' not in st.session_state:
+    st.session_state.selected_songs = set()
+if 'checkbox_key' not in st.session_state:
+    st.session_state.checkbox_key = 0
+if 'bulk_operation' not in st.session_state:
+    st.session_state.bulk_operation = False
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 if 'show_auth_flow' not in st.session_state:
@@ -197,6 +236,44 @@ if 'auth_url' not in st.session_state:
     st.session_state.auth_url = None
 if 'auth_manager' not in st.session_state:
     st.session_state.auth_manager = None
+if 'auto_login_attempted' not in st.session_state:
+    st.session_state.auto_login_attempted = False
+
+# Auto-login from cache if available
+if not st.session_state.authenticated and not st.session_state.auto_login_attempted and os.path.exists(".spotify_cache"):
+    try:
+        # Try to load from cache
+        import json
+        with open(".spotify_cache", "r") as f:
+            cache_data = json.load(f)
+        
+        # Check if token is still valid
+        if cache_data.get('access_token'):
+            # Create a temporary auth manager to validate
+            temp_auth = SpotifyOAuth(
+                client_id="temp",
+                client_secret="temp", 
+                redirect_uri="http://localhost:8888/callback",
+                scope='user-library-read playlist-modify-public playlist-modify-private',
+                cache_path=".spotify_cache"
+            )
+            
+            # Try to get cached token
+            token_info = temp_auth.get_cached_token()
+            if token_info:
+                # Create Spotify client with cached token
+                sp = spotipy.Spotify(auth=token_info['access_token'])
+                # Test if it works
+                user = sp.current_user()
+                
+                # Success! Set authenticated
+                st.session_state.sp = sp
+                st.session_state.authenticated = True
+    except:
+        # If auto-login fails, just continue normally
+        pass
+    
+    st.session_state.auto_login_attempted = True
 
 def get_spotify_client(client_id, client_secret, redirect_uri):
     """Create and return Spotify client"""
@@ -220,7 +297,7 @@ def get_spotify_client(client_id, client_secret, redirect_uri):
         return None
 
 def fetch_liked_songs(sp, progress_bar, status_text):
-    """Fetch all liked songs"""
+    """Fetch all liked songs with full details"""
     liked_songs = []
     offset = 0
     limit = 50
@@ -237,10 +314,24 @@ def fetch_liked_songs(sp, progress_bar, status_text):
         
         for item in results['items']:
             track = item['track']
+            # Get album image (smallest available)
+            image_url = track['album']['images'][-1]['url'] if track['album']['images'] else None
+            
+            # Convert duration from ms to mm:ss
+            duration_ms = track['duration_ms']
+            minutes = duration_ms // 60000
+            seconds = (duration_ms % 60000) // 1000
+            duration_str = f"{minutes}:{seconds:02d}"
+            
             liked_songs.append({
                 'uri': track['uri'],
+                'id': track['id'],
                 'name': track['name'],
-                'artist': track['artists'][0]['name']
+                'artist': ', '.join([artist['name'] for artist in track['artists']]),
+                'album': track['album']['name'],
+                'image': image_url,
+                'duration': duration_str,
+                'duration_ms': duration_ms
             })
         
         offset += limit
@@ -260,7 +351,7 @@ def create_playlist_with_tracks(sp, name, description, track_uris, progress_bar,
     playlist = sp.user_playlist_create(
         user=user_id,
         name=name,
-        public=False,
+        public=True,
         description=description
     )
     playlist_id = playlist['id']
@@ -284,6 +375,14 @@ st.markdown("✨ Copy all your liked songs to a new playlist")
 with st.sidebar:
     st.header("🔧 Spotify API Setup")
     
+    # Show logged in user if authenticated
+    if st.session_state.authenticated and st.session_state.sp:
+        try:
+            user = st.session_state.sp.current_user()
+            st.success(f"✅ Logged in as **{user['display_name']}**")
+        except:
+            pass
+    
     with st.expander("📖 Setup Instructions", expanded=False):
         st.markdown("""
         **Step 1:** Go to [Spotify Dashboard](https://developer.spotify.com/dashboard)
@@ -298,15 +397,26 @@ with st.sidebar:
         **Step 4:** Copy your credentials below
         """)
     
-    client_id = st.text_input("🔑 Client ID", type="password", value=os.getenv('SPOTIPY_CLIENT_ID', ''))
-    client_secret = st.text_input("🔐 Client Secret", type="password", value=os.getenv('SPOTIPY_CLIENT_SECRET', ''))
-    redirect_uri = st.text_input("🔗 Redirect URI", value="http://localhost:8888/callback")
+    # Only show credentials input if not authenticated
+    if not st.session_state.authenticated:
+        client_id = st.text_input("🔑 Client ID", type="password", value=os.getenv('SPOTIPY_CLIENT_ID', ''))
+        client_secret = st.text_input("🔐 Client Secret", type="password", value=os.getenv('SPOTIPY_CLIENT_SECRET', ''))
+        redirect_uri = st.text_input("🔗 Redirect URI", value="http://localhost:8888/callback")
+    else:
+        # If already authenticated, use dummy values
+        client_id = ""
+        client_secret = ""
+        redirect_uri = ""
     
     # Initial connect button
-    if not st.session_state.show_auth_flow:
+    if not st.session_state.show_auth_flow and not st.session_state.authenticated:
         if st.button("🎵 Connect to Spotify", use_container_width=True, type="primary"):
             if client_id and client_secret and redirect_uri:
                 try:
+                    # Clear old cache to force fresh authentication
+                    if os.path.exists(".spotify_cache"):
+                        os.remove(".spotify_cache")
+                    
                     scope = 'user-library-read playlist-modify-public playlist-modify-private'
                     auth_manager = SpotifyOAuth(
                         client_id=client_id,
@@ -359,12 +469,29 @@ with st.sidebar:
                     st.error(f"❌ Failed: {str(e)}")
             else:
                 st.warning("⚠️ Please paste the redirect URL")
+    
+    # Logout button if authenticated
+    if st.session_state.authenticated:
+        st.divider()
+        if st.button("🚪 Logout / Switch Account", use_container_width=True, type="secondary"):
+            # Clear cache file
+            if os.path.exists(".spotify_cache"):
+                os.remove(".spotify_cache")
+            
+            # Reset session state
+            st.session_state.sp = None
+            st.session_state.authenticated = False
+            st.session_state.show_auth_flow = False
+            st.session_state.liked_songs = []
+            st.session_state.selected_songs = set()
+            st.session_state.auth_url = None
+            st.session_state.auth_manager = None
+            
+            st.success("✅ Logged out! You can now connect with a different account.")
+            st.rerun()
 
 # Main content
 if st.session_state.authenticated and st.session_state.sp:
-    user = st.session_state.sp.current_user()
-    st.success(f"✅ Logged in as **{user['display_name']}**")
-    
     # Fetch liked songs
     if not st.session_state.liked_songs:
         st.markdown("### 📥 Step 1: Fetch Your Liked Songs")
@@ -387,46 +514,97 @@ if st.session_state.authenticated and st.session_state.sp:
     
     # Show liked songs and create playlist
     if st.session_state.liked_songs:
-        st.markdown(f"### 🎵 Found {len(st.session_state.liked_songs):,} Liked Songs")
+        # Initialize selected songs if empty
+        if not st.session_state.selected_songs:
+            st.session_state.selected_songs = set(song['id'] for song in st.session_state.liked_songs)
         
-        # Show preview
-        with st.expander("👀 Preview Songs", expanded=False):
-            for i, song in enumerate(st.session_state.liked_songs[:20]):
-                st.markdown(f"**{i+1}.** {song['name']} · *{song['artist']}*")
-            if len(st.session_state.liked_songs) > 20:
-                st.markdown(f"*... and {len(st.session_state.liked_songs) - 20:,} more songs*")
+        st.markdown(f"### 🎵 Select Songs ({len(st.session_state.selected_songs)}/{len(st.session_state.liked_songs):,} selected)")
+        
+        # Select/Deselect all buttons
+        col1, col2, col3 = st.columns([1, 1, 4])
+        with col1:
+            if st.button("✅ Select All", use_container_width=True, key="select_all_btn"):
+                st.session_state.bulk_operation = True
+                st.session_state.selected_songs = set(song['id'] for song in st.session_state.liked_songs)
+                st.session_state.checkbox_key += 1
+                st.rerun()
+        with col2:
+            if st.button("❌ Deselect All", use_container_width=True, key="deselect_all_btn"):
+                st.session_state.bulk_operation = True
+                st.session_state.selected_songs = set()
+                st.session_state.checkbox_key += 1
+                st.rerun()
+        
+        st.divider()
+        
+        # Reset bulk operation flag after rerun
+        if st.session_state.bulk_operation:
+            st.session_state.bulk_operation = False
+        
+        # Display songs with checkboxes
+        for i, song in enumerate(st.session_state.liked_songs):
+            col1, col2, col3 = st.columns([0.5, 1, 4])
+            
+            with col1:
+                # Checkbox for selection
+                is_selected = song['id'] in st.session_state.selected_songs
+                
+                def toggle_song(song_id=song['id']):
+                    # Don't toggle if this is a bulk operation
+                    if not st.session_state.bulk_operation:
+                        if song_id in st.session_state.selected_songs:
+                            st.session_state.selected_songs.discard(song_id)
+                        else:
+                            st.session_state.selected_songs.add(song_id)
+                
+                st.checkbox("", value=is_selected, key=f"song_{song['id']}_{st.session_state.checkbox_key}", 
+                           label_visibility="collapsed", on_change=toggle_song)
+            
+            with col2:
+                # Album image
+                if song['image']:
+                    st.image(song['image'], width=60)
+                else:
+                    st.markdown("🎵")
+            
+            with col3:
+                # Song details
+                st.markdown(f"**{song['name']}**")
+                st.markdown(f"*{song['artist']}* · {song['album']} · {song['duration']}")
+            
+            if i < len(st.session_state.liked_songs) - 1:
+                st.divider()
         
         st.divider()
         
         # Create playlist form
-        st.markdown("### ✨ Step 2: Create Your Playlist")
+        st.markdown("### ✨ Create Your Playlist")
         
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            playlist_name = st.text_input(
-                "📝 Playlist Name",
-                value="My Liked Songs",
-                placeholder="Enter playlist name",
-                label_visibility="collapsed"
-            )
+        playlist_name = st.text_input(
+            "📝 Playlist Name",
+            value="My Liked Songs",
+            placeholder="Enter playlist name"
+        )
         
         playlist_description = st.text_area(
             "📄 Description (optional)",
-            value="All my liked songs - Created automatically",
+            value=f"Selected {len(st.session_state.selected_songs)} songs from my liked songs",
             placeholder="Enter description",
-            height=80,
-            label_visibility="collapsed"
+            height=80
         )
         
         col1, col2 = st.columns([1, 1])
         with col1:
-            if st.button("✨ Create Playlist", type="primary", use_container_width=True):
+            if st.button("✨ Create Playlist", type="primary", use_container_width=True, disabled=len(st.session_state.selected_songs) == 0):
                 if playlist_name:
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
                     try:
-                        track_uris = [song['uri'] for song in st.session_state.liked_songs]
+                        # Get only selected songs
+                        selected_tracks = [song for song in st.session_state.liked_songs if song['id'] in st.session_state.selected_songs]
+                        track_uris = [song['uri'] for song in selected_tracks]
+                        
                         playlist_id, playlist_url = create_playlist_with_tracks(
                             st.session_state.sp,
                             playlist_name,
@@ -446,6 +624,7 @@ if st.session_state.authenticated and st.session_state.sp:
                         # Reset
                         if st.button("🔄 Create Another Playlist"):
                             st.session_state.liked_songs = []
+                            st.session_state.selected_songs = set()
                             st.rerun()
                             
                     except Exception as e:
@@ -454,8 +633,10 @@ if st.session_state.authenticated and st.session_state.sp:
                     st.warning("⚠️ Please enter a playlist name")
         
         with col2:
-            if st.button("🔄 Fetch Again", use_container_width=True):
+            if st.button("🔄 Fetch Again", use_container_width=True, type="secondary"):
                 st.session_state.liked_songs = []
+                st.session_state.selected_songs = set()
+                st.session_state.checkbox_key = 0
                 st.rerun()
 
 else:

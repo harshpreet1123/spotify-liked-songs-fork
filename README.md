@@ -1,6 +1,6 @@
 # Spotify Liked Songs to Playlist
 
-Copy all your Spotify liked songs to a new playlist with a web interface.
+Copy your Spotify liked songs to a new playlist with a beautiful web interface. Select exactly which songs you want with album art, artist info, and duration!
 
 ## Quick Start
 
@@ -54,13 +54,21 @@ The app will open in your browser automatically. Enter your API credentials in t
 
 ## Features
 
-- Web interface with real-time progress tracking
-- Preview your liked songs before creating playlist
-- Custom playlist name and description
-- Handles large libraries (batched requests)
-- Direct link to open playlist in Spotify
+- 🎨 Beautiful Spotify-themed UI
+- 🖼️ Album artwork for every song
+- ✅ Select/deselect individual songs
+- 🔘 Select all / Deselect all buttons
+- 📊 Real-time selection counter
+- 🎵 Full song details (artist, album, duration)
+- 📝 Custom playlist name and description
+- 🚀 Handles large libraries (batched requests)
+- 🔗 Direct link to open playlist in Spotify
 
 ## Notes
 
+- Spotify requires API credentials (free to create)
 - First run will open a browser for Spotify authorization
+- After first login, you'll be automatically logged in on subsequent runs
+- Use "Logout / Switch Account" button to change accounts
 - All liked songs are fetched regardless of library size
+- All songs are selected by default - uncheck the ones you don't want

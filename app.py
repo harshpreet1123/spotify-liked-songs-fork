@@ -1,0 +1,481 @@
+import streamlit as st
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+import os
+
+# Page config
+st.set_page_config(
+    page_title="Spotify Liked Songs to Playlist",
+    page_icon="🎵",
+    layout="centered"
+)
+
+# Spotify color theme
+st.markdown("""
+<style>
+    /* Main app background */
+    .stApp {
+        background-color: #121212;
+    }
+    
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background-color: #000000;
+    }
+    [data-testid="stSidebar"] > div:first-child {
+        background-color: #000000;
+    }
+    
+    /* Button styling */
+    .stButton > button {
+        background-color: #1DB954 !important;
+        color: #000000 !important;
+        border-radius: 500px !important;
+        font-weight: 700 !important;
+        border: none !important;
+        padding: 12px 32px !important;
+        font-size: 14px !important;
+        transition: all 0.2s ease !important;
+        letter-spacing: 1.5px !important;
+        text-transform: uppercase !important;
+    }
+    .stButton > button:hover {
+        background-color: #1ed760 !important;
+        transform: scale(1.04) !important;
+    }
+    
+    /* Text input - complete unified styling */
+    .stTextInput > div {
+        background-color: transparent !important;
+        gap: 0 !important;
+    }
+    
+    /* Input wrapper - make it seamless */
+    .stTextInput > div > div {
+        background-color: transparent !important;
+        border-radius: 4px !important;
+        border: none !important;
+        display: flex !important;
+        align-items: center !important;
+        overflow: hidden !important;
+    }
+    
+    /* Text input field */
+    .stTextInput input {
+        background-color: transparent !important;
+        color: #ffffff !important;
+        border: none !important;
+        border-radius: 4px !important;
+        padding: 12px 14px !important;
+        font-size: 14px !important;
+        flex: 1 !important;
+    }
+    .stTextInput input:focus {
+        outline: none !important;
+    }
+    
+    /* Password eye icon button - blend seamlessly */
+    .stTextInput button {
+        background-color: transparent !important;
+        border: none !important;
+        margin: 0 !important;
+        height: 100% !important;
+        border-radius: 0 !important;
+    }
+    .stTextInput button:hover {
+        color: #ffffff !important;
+    }
+    .stTextInput button:focus {
+        box-shadow: none !important;
+    }
+    
+    /* Text area styling */
+    .stTextArea textarea {
+        color: #ffffff !important;
+        border: none !important;
+        border-radius: 4px !important;
+        padding: 12px 14px !important;
+        font-size: 14px !important;
+    }
+    .stTextArea textarea:focus {
+        outline: none !important;
+    }
+    
+    /* Labels */
+    .stTextInput label, .stTextArea label {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        font-size: 14px !important;
+        margin-bottom: 8px !important;
+    }
+    
+    /* Typography */
+    h1 {
+        color: #ffffff !important;
+        font-weight: 900 !important;
+    }
+    h2, h3 {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+    }
+    p, div, span, label, li {
+        color: #b3b3b3 !important;
+    }
+    
+    /* Links */
+    a {
+        color: #1DB954 !important;
+        text-decoration: none !important;
+    }
+    a:hover {
+        color: #1ed760 !important;
+        text-decoration: underline !important;
+    }
+    
+    /* Alert boxes */
+    .stSuccess {
+        background-color: rgba(29, 185, 84, 0.15) !important;
+        border-left: 4px solid #1DB954 !important;
+        color: #ffffff !important;
+    }
+    .stInfo {
+        background-color: rgba(30, 215, 96, 0.1) !important;
+        border-left: 4px solid #1DB954 !important;
+        color: #ffffff !important;
+    }
+    .stWarning {
+        background-color: rgba(255, 152, 0, 0.15) !important;
+        border-left: 4px solid #ff9800 !important;
+        color: #ffffff !important;
+    }
+    .stError {
+        background-color: rgba(244, 67, 54, 0.15) !important;
+        border-left: 4px solid #f44336 !important;
+        color: #ffffff !important;
+    }
+    
+    /* Expander */
+    .streamlit-expanderHeader {
+        background-color: #181818 !important;
+        border-radius: 8px !important;
+        color: #ffffff !important;
+    }
+    .streamlit-expanderHeader:hover {
+        background-color: #282828 !important;
+    }
+    
+    /* Progress bar */
+    .stProgress > div > div > div > div {
+        background-color: #1DB954 !important;
+    }
+    
+    /* Divider */
+    hr {
+        border-color: #282828 !important;
+    }
+    
+    /* Code blocks */
+    code {
+        background-color: #282828 !important;
+        color: #1DB954 !important;
+        padding: 3px 8px !important;
+        border-radius: 4px !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Session state initialization
+if 'sp' not in st.session_state:
+    st.session_state.sp = None
+if 'liked_songs' not in st.session_state:
+    st.session_state.liked_songs = []
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+if 'show_auth_flow' not in st.session_state:
+    st.session_state.show_auth_flow = False
+if 'auth_url' not in st.session_state:
+    st.session_state.auth_url = None
+if 'auth_manager' not in st.session_state:
+    st.session_state.auth_manager = None
+
+def get_spotify_client(client_id, client_secret, redirect_uri):
+    """Create and return Spotify client"""
+    try:
+        scope = 'user-library-read playlist-modify-public playlist-modify-private'
+        auth_manager = SpotifyOAuth(
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            scope=scope,
+            cache_path=".spotify_cache",
+            open_browser=False,
+            show_dialog=True
+        )
+        sp = spotipy.Spotify(auth_manager=auth_manager)
+        # Test authentication
+        sp.current_user()
+        return sp
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        return None
+
+def fetch_liked_songs(sp, progress_bar, status_text):
+    """Fetch all liked songs"""
+    liked_songs = []
+    offset = 0
+    limit = 50
+    
+    # Get total first
+    initial = sp.current_user_saved_tracks(limit=1)
+    total = initial['total']
+    status_text.text(f"Found {total} liked songs. Fetching...")
+    
+    while True:
+        results = sp.current_user_saved_tracks(limit=limit, offset=offset)
+        if not results['items']:
+            break
+        
+        for item in results['items']:
+            track = item['track']
+            liked_songs.append({
+                'uri': track['uri'],
+                'name': track['name'],
+                'artist': track['artists'][0]['name']
+            })
+        
+        offset += limit
+        progress = min(offset / total, 1.0)
+        progress_bar.progress(progress)
+        
+        if len(results['items']) < limit:
+            break
+    
+    return liked_songs
+
+def create_playlist_with_tracks(sp, name, description, track_uris, progress_bar, status_text):
+    """Create playlist and add tracks"""
+    user_id = sp.current_user()['id']
+    
+    status_text.text("Creating playlist...")
+    playlist = sp.user_playlist_create(
+        user=user_id,
+        name=name,
+        public=False,
+        description=description
+    )
+    playlist_id = playlist['id']
+    
+    status_text.text(f"Adding {len(track_uris)} tracks...")
+    batch_size = 100
+    
+    for i in range(0, len(track_uris), batch_size):
+        batch = track_uris[i:i + batch_size]
+        sp.playlist_add_items(playlist_id, batch)
+        progress = (i + len(batch)) / len(track_uris)
+        progress_bar.progress(progress)
+    
+    return playlist_id, playlist['external_urls']['spotify']
+
+# UI
+st.title("🎵 Spotify Liked Songs to Playlist")
+st.markdown("✨ Copy all your liked songs to a new playlist")
+
+# Sidebar for credentials
+with st.sidebar:
+    st.header("🔧 Spotify API Setup")
+    
+    with st.expander("📖 Setup Instructions", expanded=False):
+        st.markdown("""
+        **Step 1:** Go to [Spotify Dashboard](https://developer.spotify.com/dashboard)
+        
+        **Step 2:** Create an app
+        
+        **Step 3:** Add this to Redirect URIs:
+        ```
+        http://localhost:8888/callback
+        ```
+        
+        **Step 4:** Copy your credentials below
+        """)
+    
+    client_id = st.text_input("🔑 Client ID", type="password", value=os.getenv('SPOTIPY_CLIENT_ID', ''))
+    client_secret = st.text_input("🔐 Client Secret", type="password", value=os.getenv('SPOTIPY_CLIENT_SECRET', ''))
+    redirect_uri = st.text_input("🔗 Redirect URI", value="http://localhost:8888/callback")
+    
+    # Initial connect button
+    if not st.session_state.show_auth_flow:
+        if st.button("🎵 Connect to Spotify", use_container_width=True, type="primary"):
+            if client_id and client_secret and redirect_uri:
+                try:
+                    scope = 'user-library-read playlist-modify-public playlist-modify-private'
+                    auth_manager = SpotifyOAuth(
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        redirect_uri=redirect_uri,
+                        scope=scope,
+                        cache_path=".spotify_cache",
+                        open_browser=False
+                    )
+                    
+                    # Get auth URL
+                    auth_url = auth_manager.get_authorize_url()
+                    st.session_state.auth_url = auth_url
+                    st.session_state.auth_manager = auth_manager
+                    st.session_state.show_auth_flow = True
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+            else:
+                st.warning("⚠️ Please fill in all fields")
+    
+    # Auth flow section
+    if st.session_state.show_auth_flow and not st.session_state.authenticated:
+        st.divider()
+        st.markdown("### 🔐 Authentication Steps")
+        
+        st.markdown("**Step 1:** Click the link below to authorize")
+        st.markdown(f"[🎵 Authorize on Spotify]({st.session_state.auth_url})")
+        
+        st.markdown("**Step 2:** After authorizing, copy the **full URL** from your browser")
+        
+        st.markdown("**Step 3:** Paste it here:")
+        redirect_response = st.text_input("📋 Paste redirect URL:", key="redirect_url", label_visibility="collapsed")
+        
+        if st.button("✅ Complete Authentication", use_container_width=True, type="primary"):
+            if redirect_response:
+                try:
+                    code = st.session_state.auth_manager.parse_response_code(redirect_response)
+                    token = st.session_state.auth_manager.get_access_token(code, as_dict=False)
+                    sp = spotipy.Spotify(auth=token)
+                    sp.current_user()  # Test
+                    
+                    st.session_state.sp = sp
+                    st.session_state.authenticated = True
+                    st.session_state.show_auth_flow = False
+                    st.success("✅ Connected!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Failed: {str(e)}")
+            else:
+                st.warning("⚠️ Please paste the redirect URL")
+
+# Main content
+if st.session_state.authenticated and st.session_state.sp:
+    user = st.session_state.sp.current_user()
+    st.success(f"✅ Logged in as **{user['display_name']}**")
+    
+    # Fetch liked songs
+    if not st.session_state.liked_songs:
+        st.markdown("### 📥 Step 1: Fetch Your Liked Songs")
+        if st.button("🎵 Fetch My Liked Songs", use_container_width=True, type="primary"):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            try:
+                liked_songs = fetch_liked_songs(
+                    st.session_state.sp,
+                    progress_bar,
+                    status_text
+                )
+                st.session_state.liked_songs = liked_songs
+                status_text.text(f"✅ Fetched {len(liked_songs)} songs!")
+                progress_bar.empty()
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error fetching songs: {str(e)}")
+    
+    # Show liked songs and create playlist
+    if st.session_state.liked_songs:
+        st.markdown(f"### 🎵 Found {len(st.session_state.liked_songs):,} Liked Songs")
+        
+        # Show preview
+        with st.expander("👀 Preview Songs", expanded=False):
+            for i, song in enumerate(st.session_state.liked_songs[:20]):
+                st.markdown(f"**{i+1}.** {song['name']} · *{song['artist']}*")
+            if len(st.session_state.liked_songs) > 20:
+                st.markdown(f"*... and {len(st.session_state.liked_songs) - 20:,} more songs*")
+        
+        st.divider()
+        
+        # Create playlist form
+        st.markdown("### ✨ Step 2: Create Your Playlist")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            playlist_name = st.text_input(
+                "📝 Playlist Name",
+                value="My Liked Songs",
+                placeholder="Enter playlist name",
+                label_visibility="collapsed"
+            )
+        
+        playlist_description = st.text_area(
+            "📄 Description (optional)",
+            value="All my liked songs - Created automatically",
+            placeholder="Enter description",
+            height=80,
+            label_visibility="collapsed"
+        )
+        
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            if st.button("✨ Create Playlist", type="primary", use_container_width=True):
+                if playlist_name:
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    try:
+                        track_uris = [song['uri'] for song in st.session_state.liked_songs]
+                        playlist_id, playlist_url = create_playlist_with_tracks(
+                            st.session_state.sp,
+                            playlist_name,
+                            playlist_description,
+                            track_uris,
+                            progress_bar,
+                            status_text
+                        )
+                        
+                        progress_bar.empty()
+                        status_text.empty()
+                        
+                        st.balloons()
+                        st.success(f"🎉 Created playlist with {len(track_uris):,} songs!")
+                        st.markdown(f"### [🎵 Open in Spotify →]({playlist_url})")
+                        
+                        # Reset
+                        if st.button("🔄 Create Another Playlist"):
+                            st.session_state.liked_songs = []
+                            st.rerun()
+                            
+                    except Exception as e:
+                        st.error(f"❌ Error creating playlist: {str(e)}")
+                else:
+                    st.warning("⚠️ Please enter a playlist name")
+        
+        with col2:
+            if st.button("🔄 Fetch Again", use_container_width=True):
+                st.session_state.liked_songs = []
+                st.rerun()
+
+else:
+    st.markdown("### 👋 Welcome!")
+    st.info("👈 Enter your Spotify API credentials in the sidebar to get started")
+    
+    with st.expander("📖 How to get API credentials", expanded=True):
+        st.markdown("""
+        **1.** Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+        
+        **2.** Log in with your Spotify account
+        
+        **3.** Click **"Create app"**
+        
+        **4.** Fill in:
+        - App name: *anything you want*
+        - App description: *anything you want*
+        - Redirect URI: `http://localhost:8888/callback`
+        
+        **5.** Save and copy your **Client ID** and **Client Secret**
+        
+        **6.** Paste them in the sidebar and click **"Connect to Spotify"**
+        """)

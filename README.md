@@ -89,7 +89,5 @@ The app will open in your browser automatically. Enter your API credentials in t
 
 - Spotify requires API credentials (free to create)
 - First run will open a browser for Spotify authorization
-- After first login, you'll be automatically logged in on subsequent runs
-- Use "Logout / Switch Account" button to change accounts
 - All liked songs are fetched regardless of library size
 - All songs are selected by default - uncheck the ones you don't want

@@ -234,6 +234,8 @@ if 'selected_playlist_songs' not in st.session_state:
     st.session_state.selected_playlist_songs = set()
 if 'user_playlists' not in st.session_state:
     st.session_state.user_playlists = []
+if 'cached_token' not in st.session_state:
+    st.session_state.cached_token = None
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 if 'show_auth_flow' not in st.session_state:
@@ -245,39 +247,22 @@ if 'auth_manager' not in st.session_state:
 if 'auto_login_attempted' not in st.session_state:
     st.session_state.auto_login_attempted = False
 
-# Auto-login from cache if available
-if not st.session_state.authenticated and not st.session_state.auto_login_attempted and os.path.exists(".spotify_cache"):
-    try:
-        # Try to load from cache
-        import json
-        with open(".spotify_cache", "r") as f:
-            cache_data = json.load(f)
-        
-        # Check if token is still valid
-        if cache_data.get('access_token'):
-            # Create a temporary auth manager to validate
-            temp_auth = SpotifyOAuth(
-                client_id="temp",
-                client_secret="temp", 
-                redirect_uri="http://localhost:8888/callback",
-                scope='user-library-read playlist-modify-public playlist-modify-private',
-                cache_path=".spotify_cache"
-            )
+# Auto-login from session cache (not file-based for security)
+if not st.session_state.authenticated and not st.session_state.auto_login_attempted:
+    # Check if we have cached credentials in session state
+    if 'cached_token' in st.session_state and st.session_state.cached_token:
+        try:
+            # Try to use cached token
+            sp = spotipy.Spotify(auth=st.session_state.cached_token)
+            # Test if it works
+            user = sp.current_user()
             
-            # Try to get cached token
-            token_info = temp_auth.get_cached_token()
-            if token_info:
-                # Create Spotify client with cached token
-                sp = spotipy.Spotify(auth=token_info['access_token'])
-                # Test if it works
-                user = sp.current_user()
-                
-                # Success! Set authenticated
-                st.session_state.sp = sp
-                st.session_state.authenticated = True
-    except:
-        # If auto-login fails, just continue normally
-        pass
+            # Success! Set authenticated
+            st.session_state.sp = sp
+            st.session_state.authenticated = True
+        except:
+            # Token expired or invalid, clear it
+            st.session_state.cached_token = None
     
     st.session_state.auto_login_attempted = True
 
@@ -528,9 +513,16 @@ with st.sidebar:
                     sp = spotipy.Spotify(auth=token)
                     sp.current_user()  # Test
                     
+                    # Store token in session state (NOT in file for security)
                     st.session_state.sp = sp
+                    st.session_state.cached_token = token
                     st.session_state.authenticated = True
                     st.session_state.show_auth_flow = False
+                    
+                    # Delete any file-based cache for security
+                    if os.path.exists(".spotify_cache"):
+                        os.remove(".spotify_cache")
+                    
                     st.success("✅ Connected!")
                     st.rerun()
                 except Exception as e:
@@ -542,18 +534,24 @@ with st.sidebar:
     if st.session_state.authenticated:
         st.divider()
         if st.button("🚪 Logout / Switch Account", use_container_width=True, type="secondary"):
-            # Clear cache file
+            # Clear cache file (if any exists)
             if os.path.exists(".spotify_cache"):
                 os.remove(".spotify_cache")
             
-            # Reset session state
+            # Reset ALL session state
             st.session_state.sp = None
+            st.session_state.cached_token = None
             st.session_state.authenticated = False
             st.session_state.show_auth_flow = False
             st.session_state.liked_songs = []
             st.session_state.selected_songs = set()
+            st.session_state.playlist_songs = []
+            st.session_state.selected_playlist_songs = set()
+            st.session_state.user_playlists = []
             st.session_state.auth_url = None
             st.session_state.auth_manager = None
+            st.session_state.checkbox_key = 0
+            st.session_state.auto_login_attempted = False
             
             st.success("✅ Logged out! You can now connect with a different account.")
             st.rerun()

@@ -1,6 +1,6 @@
-# Spotify Liked Songs to Playlist
+# Spotify Playlist Manager
 
-Copy your Spotify liked songs to a new playlist with a beautiful web interface. Select exactly which songs you want with album art, artist info, and duration!
+A powerful Spotify playlist management tool with a beautiful web interface. Copy liked songs, fork public playlists, and manage all your playlists in one place!
 
 ## Quick Start
 
@@ -50,19 +50,40 @@ streamlit run app.py
 
 ## Usage
 
-The app will open in your browser automatically. Enter your API credentials in the sidebar, connect to Spotify, and follow the on-screen instructions to copy your liked songs to a new playlist.
+The app will open in your browser automatically. Enter your API credentials in the sidebar, connect to Spotify, and choose from three powerful features:
+
+1. **Liked Songs** - Copy your liked songs to a new playlist
+2. **Copy from Playlist** - Fork any public playlist by URL
+3. **My Playlists** - View and manage all your playlists
 
 ## Features
 
+### 📥 Liked Songs Manager
 - 🎨 Beautiful Spotify-themed UI
 - 🖼️ Album artwork for every song
 - ✅ Select/deselect individual songs
-- 🔘 Select all / Deselect all buttons
+- �  Select all / Deselect all buttons
 - 📊 Real-time selection counter
 - 🎵 Full song details (artist, album, duration)
-- 📝 Custom playlist name and description
+
+### 🔗 Playlist Forking
+- Copy songs from any public Spotify playlist
+- Just paste the playlist URL
+- Select which songs to copy
+- Create your own version
+
+### 📋 Playlist Management
+- View all your playlists
+- See track counts and privacy settings
+- Quick links to open in Spotify
+- Easy playlist overview
+
+### ✨ General Features
+- 📝 Custom playlist names and descriptions
 - 🚀 Handles large libraries (batched requests)
-- 🔗 Direct link to open playlist in Spotify
+- 🔗 Direct links to open playlists in Spotify
+- 💾 Auto-login from cache
+- 🔄 Easy account switching
 
 ## Notes
 

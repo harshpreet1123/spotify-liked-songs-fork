@@ -228,6 +228,12 @@ if 'checkbox_key' not in st.session_state:
     st.session_state.checkbox_key = 0
 if 'bulk_operation' not in st.session_state:
     st.session_state.bulk_operation = False
+if 'playlist_songs' not in st.session_state:
+    st.session_state.playlist_songs = []
+if 'selected_playlist_songs' not in st.session_state:
+    st.session_state.selected_playlist_songs = set()
+if 'user_playlists' not in st.session_state:
+    st.session_state.user_playlists = []
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 if 'show_auth_flow' not in st.session_state:
@@ -367,9 +373,71 @@ def create_playlist_with_tracks(sp, name, description, track_uris, progress_bar,
     
     return playlist_id, playlist['external_urls']['spotify']
 
+def fetch_playlist_from_url(sp, playlist_url):
+    """Fetch playlist tracks from URL"""
+    try:
+        # Extract playlist ID from URL
+        if 'playlist/' in playlist_url:
+            playlist_id = playlist_url.split('playlist/')[1].split('?')[0]
+        else:
+            playlist_id = playlist_url
+        
+        # Get playlist details
+        playlist = sp.playlist(playlist_id)
+        
+        # Fetch all tracks
+        tracks = []
+        results = playlist['tracks']
+        
+        while results:
+            for item in results['items']:
+                if item['track']:
+                    track = item['track']
+                    image_url = track['album']['images'][-1]['url'] if track['album']['images'] else None
+                    duration_ms = track['duration_ms']
+                    minutes = duration_ms // 60000
+                    seconds = (duration_ms % 60000) // 1000
+                    duration_str = f"{minutes}:{seconds:02d}"
+                    
+                    tracks.append({
+                        'uri': track['uri'],
+                        'id': track['id'],
+                        'name': track['name'],
+                        'artist': ', '.join([artist['name'] for artist in track['artists']]),
+                        'album': track['album']['name'],
+                        'image': image_url,
+                        'duration': duration_str,
+                        'duration_ms': duration_ms
+                    })
+            
+            results = sp.next(results) if results['next'] else None
+        
+        return playlist['name'], tracks
+    except Exception as e:
+        raise Exception(f"Failed to fetch playlist: {str(e)}")
+
+def get_user_playlists(sp):
+    """Get all user playlists"""
+    playlists = []
+    results = sp.current_user_playlists(limit=50)
+    
+    while results:
+        for playlist in results['items']:
+            playlists.append({
+                'id': playlist['id'],
+                'name': playlist['name'],
+                'tracks_total': playlist['tracks']['total'],
+                'public': playlist['public'],
+                'url': playlist['external_urls']['spotify'],
+                'image': playlist['images'][0]['url'] if playlist['images'] else None
+            })
+        results = sp.next(results) if results['next'] else None
+    
+    return playlists
+
 # UI
-st.title("🎵 Spotify Liked Songs to Playlist")
-st.markdown("✨ Copy all your liked songs to a new playlist")
+st.title("🎵 Spotify Playlist Manager")
+st.markdown("✨ Manage your Spotify playlists with ease")
 
 # Sidebar for credentials
 with st.sidebar:
@@ -492,152 +560,297 @@ with st.sidebar:
 
 # Main content
 if st.session_state.authenticated and st.session_state.sp:
-    # Fetch liked songs
-    if not st.session_state.liked_songs:
-        st.markdown("### 📥 Step 1: Fetch Your Liked Songs")
-        if st.button("🎵 Fetch My Liked Songs", use_container_width=True, type="primary"):
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            try:
-                liked_songs = fetch_liked_songs(
-                    st.session_state.sp,
-                    progress_bar,
-                    status_text
-                )
-                st.session_state.liked_songs = liked_songs
-                status_text.text(f"✅ Fetched {len(liked_songs)} songs!")
-                progress_bar.empty()
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Error fetching songs: {str(e)}")
+    # Create tabs for different features
+    tab1, tab2, tab3 = st.tabs(["📥 Liked Songs", "🔗 Copy from Playlist", "📋 My Playlists"])
     
-    # Show liked songs and create playlist
-    if st.session_state.liked_songs:
-        # Initialize selected songs if empty
-        if not st.session_state.selected_songs:
-            st.session_state.selected_songs = set(song['id'] for song in st.session_state.liked_songs)
+    # TAB 1: Liked Songs
+    with tab1:
+        # Fetch liked songs
+        if not st.session_state.liked_songs:
+            st.markdown("### 📥 Step 1: Fetch Your Liked Songs")
+            if st.button("🎵 Fetch My Liked Songs", use_container_width=True, type="primary"):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                try:
+                    liked_songs = fetch_liked_songs(
+                        st.session_state.sp,
+                        progress_bar,
+                        status_text
+                    )
+                    st.session_state.liked_songs = liked_songs
+                    status_text.text(f"✅ Fetched {len(liked_songs)} songs!")
+                    progress_bar.empty()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error fetching songs: {str(e)}")
         
-        st.markdown(f"### 🎵 Select Songs ({len(st.session_state.selected_songs)}/{len(st.session_state.liked_songs):,} selected)")
-        
-        # Select/Deselect all buttons
-        col1, col2, col3 = st.columns([1, 1, 4])
-        with col1:
-            if st.button("✅ Select All", use_container_width=True, key="select_all_btn"):
-                st.session_state.bulk_operation = True
+        # Show liked songs and create playlist
+        if st.session_state.liked_songs:
+            # Initialize selected songs if empty
+            if not st.session_state.selected_songs:
                 st.session_state.selected_songs = set(song['id'] for song in st.session_state.liked_songs)
-                st.session_state.checkbox_key += 1
-                st.rerun()
-        with col2:
-            if st.button("❌ Deselect All", use_container_width=True, key="deselect_all_btn"):
-                st.session_state.bulk_operation = True
-                st.session_state.selected_songs = set()
-                st.session_state.checkbox_key += 1
-                st.rerun()
-        
-        st.divider()
-        
-        # Reset bulk operation flag after rerun
-        if st.session_state.bulk_operation:
-            st.session_state.bulk_operation = False
-        
-        # Display songs with checkboxes
-        for i, song in enumerate(st.session_state.liked_songs):
-            col1, col2, col3 = st.columns([0.5, 1, 4])
             
+            st.markdown(f"### 🎵 Select Songs ({len(st.session_state.selected_songs)}/{len(st.session_state.liked_songs):,} selected)")
+            
+            # Select/Deselect all buttons
+            col1, col2, col3 = st.columns([1, 1, 4])
             with col1:
-                # Checkbox for selection
-                is_selected = song['id'] in st.session_state.selected_songs
+                if st.button("✅ Select All", use_container_width=True, key="select_all_btn"):
+                    st.session_state.bulk_operation = True
+                    st.session_state.selected_songs = set(song['id'] for song in st.session_state.liked_songs)
+                    st.session_state.checkbox_key += 1
+                    st.rerun()
+            with col2:
+                if st.button("❌ Deselect All", use_container_width=True, key="deselect_all_btn"):
+                    st.session_state.bulk_operation = True
+                    st.session_state.selected_songs = set()
+                    st.session_state.checkbox_key += 1
+                    st.rerun()
+            
+            st.divider()
+            
+            # Reset bulk operation flag after rerun
+            if st.session_state.bulk_operation:
+                st.session_state.bulk_operation = False
+            
+            # Display songs with checkboxes
+            for i, song in enumerate(st.session_state.liked_songs):
+                col1, col2, col3 = st.columns([0.5, 1, 4])
                 
-                def toggle_song(song_id=song['id']):
-                    # Don't toggle if this is a bulk operation
-                    if not st.session_state.bulk_operation:
-                        if song_id in st.session_state.selected_songs:
-                            st.session_state.selected_songs.discard(song_id)
-                        else:
-                            st.session_state.selected_songs.add(song_id)
+                with col1:
+                    # Checkbox for selection
+                    is_selected = song['id'] in st.session_state.selected_songs
+                    
+                    def toggle_song(song_id=song['id']):
+                        # Don't toggle if this is a bulk operation
+                        if not st.session_state.bulk_operation:
+                            if song_id in st.session_state.selected_songs:
+                                st.session_state.selected_songs.discard(song_id)
+                            else:
+                                st.session_state.selected_songs.add(song_id)
+                    
+                    st.checkbox("", value=is_selected, key=f"song_{song['id']}_{st.session_state.checkbox_key}", 
+                               label_visibility="collapsed", on_change=toggle_song)
                 
-                st.checkbox("", value=is_selected, key=f"song_{song['id']}_{st.session_state.checkbox_key}", 
-                           label_visibility="collapsed", on_change=toggle_song)
+                with col2:
+                    # Album image
+                    if song['image']:
+                        st.image(song['image'], width=60)
+                    else:
+                        st.markdown("🎵")
+                
+                with col3:
+                    # Song details
+                    st.markdown(f"**{song['name']}**")
+                    st.markdown(f"*{song['artist']}* · {song['album']} · {song['duration']}")
+                
+                if i < len(st.session_state.liked_songs) - 1:
+                    st.divider()
+            
+            st.divider()
+            
+            # Create playlist form
+            st.markdown("### ✨ Create Your Playlist")
+            
+            playlist_name = st.text_input(
+                "📝 Playlist Name",
+                value="My Liked Songs",
+                placeholder="Enter playlist name"
+            )
+            
+            playlist_description = st.text_area(
+                "📄 Description (optional)",
+                value=f"Selected {len(st.session_state.selected_songs)} songs from my liked songs",
+                placeholder="Enter description",
+                height=80
+            )
+            
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("✨ Create Playlist", type="primary", use_container_width=True, disabled=len(st.session_state.selected_songs) == 0):
+                    if playlist_name:
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        try:
+                            # Get only selected songs
+                            selected_tracks = [song for song in st.session_state.liked_songs if song['id'] in st.session_state.selected_songs]
+                            track_uris = [song['uri'] for song in selected_tracks]
+                            
+                            playlist_id, playlist_url = create_playlist_with_tracks(
+                                st.session_state.sp,
+                                playlist_name,
+                                playlist_description,
+                                track_uris,
+                                progress_bar,
+                                status_text
+                            )
+                            
+                            progress_bar.empty()
+                            status_text.empty()
+                            
+                            st.balloons()
+                            st.success(f"🎉 Created playlist with {len(track_uris):,} songs!")
+                            st.markdown(f"### [🎵 Open in Spotify →]({playlist_url})")
+                            
+                            # Reset
+                            if st.button("🔄 Create Another Playlist"):
+                                st.session_state.liked_songs = []
+                                st.session_state.selected_songs = set()
+                                st.rerun()
+                                
+                        except Exception as e:
+                            st.error(f"❌ Error creating playlist: {str(e)}")
+                    else:
+                        st.warning("⚠️ Please enter a playlist name")
             
             with col2:
-                # Album image
-                if song['image']:
-                    st.image(song['image'], width=60)
-                else:
-                    st.markdown("🎵")
-            
-            with col3:
-                # Song details
-                st.markdown(f"**{song['name']}**")
-                st.markdown(f"*{song['artist']}* · {song['album']} · {song['duration']}")
-            
-            if i < len(st.session_state.liked_songs) - 1:
-                st.divider()
+                if st.button("🔄 Fetch Again", use_container_width=True, type="secondary"):
+                    st.session_state.liked_songs = []
+                    st.session_state.selected_songs = set()
+                    st.session_state.checkbox_key = 0
+                    st.rerun()
+    
+    # TAB 2: Copy from Playlist
+    with tab2:
+        st.markdown("### 🔗 Copy Songs from Any Playlist")
+        st.markdown("Enter a Spotify playlist URL to copy songs from it")
         
-        st.divider()
+        playlist_url = st.text_input("📋 Playlist URL", placeholder="https://open.spotify.com/playlist/...")
         
-        # Create playlist form
-        st.markdown("### ✨ Create Your Playlist")
-        
-        playlist_name = st.text_input(
-            "📝 Playlist Name",
-            value="My Liked Songs",
-            placeholder="Enter playlist name"
-        )
-        
-        playlist_description = st.text_area(
-            "📄 Description (optional)",
-            value=f"Selected {len(st.session_state.selected_songs)} songs from my liked songs",
-            placeholder="Enter description",
-            height=80
-        )
-        
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            if st.button("✨ Create Playlist", type="primary", use_container_width=True, disabled=len(st.session_state.selected_songs) == 0):
-                if playlist_name:
+        if st.button("🔍 Fetch Playlist", type="primary"):
+            if playlist_url:
+                try:
                     progress_bar = st.progress(0)
                     status_text = st.empty()
+                    status_text.text("Fetching playlist...")
                     
-                    try:
-                        # Get only selected songs
-                        selected_tracks = [song for song in st.session_state.liked_songs if song['id'] in st.session_state.selected_songs]
-                        track_uris = [song['uri'] for song in selected_tracks]
-                        
-                        playlist_id, playlist_url = create_playlist_with_tracks(
-                            st.session_state.sp,
-                            playlist_name,
-                            playlist_description,
-                            track_uris,
-                            progress_bar,
-                            status_text
-                        )
-                        
-                        progress_bar.empty()
-                        status_text.empty()
-                        
-                        st.balloons()
-                        st.success(f"🎉 Created playlist with {len(track_uris):,} songs!")
-                        st.markdown(f"### [🎵 Open in Spotify →]({playlist_url})")
-                        
-                        # Reset
-                        if st.button("🔄 Create Another Playlist"):
-                            st.session_state.liked_songs = []
-                            st.session_state.selected_songs = set()
-                            st.rerun()
-                            
-                    except Exception as e:
-                        st.error(f"❌ Error creating playlist: {str(e)}")
-                else:
-                    st.warning("⚠️ Please enter a playlist name")
+                    playlist_name, tracks = fetch_playlist_from_url(st.session_state.sp, playlist_url)
+                    st.session_state.playlist_songs = tracks
+                    st.session_state.selected_playlist_songs = set(song['id'] for song in tracks)
+                    
+                    progress_bar.empty()
+                    status_text.empty()
+                    st.success(f"✅ Fetched **{playlist_name}** with {len(tracks)} songs!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ {str(e)}")
+            else:
+                st.warning("⚠️ Please enter a playlist URL")
         
-        with col2:
-            if st.button("🔄 Fetch Again", use_container_width=True, type="secondary"):
-                st.session_state.liked_songs = []
-                st.session_state.selected_songs = set()
-                st.session_state.checkbox_key = 0
+        # Show fetched playlist songs
+        if st.session_state.playlist_songs:
+            st.markdown(f"### 🎵 Select Songs ({len(st.session_state.selected_playlist_songs)}/{len(st.session_state.playlist_songs)} selected)")
+            
+            col1, col2, col3 = st.columns([1, 1, 4])
+            with col1:
+                if st.button("✅ Select All", use_container_width=True, key="pl_select_all"):
+                    st.session_state.selected_playlist_songs = set(song['id'] for song in st.session_state.playlist_songs)
+                    st.rerun()
+            with col2:
+                if st.button("❌ Deselect All", use_container_width=True, key="pl_deselect_all"):
+                    st.session_state.selected_playlist_songs = set()
+                    st.rerun()
+            
+            st.divider()
+            
+            # Display songs
+            for song in st.session_state.playlist_songs:
+                col1, col2, col3 = st.columns([0.5, 1, 4])
+                
+                with col1:
+                    is_selected = song['id'] in st.session_state.selected_playlist_songs
+                    if st.checkbox("", value=is_selected, key=f"pl_song_{song['id']}", label_visibility="collapsed"):
+                        st.session_state.selected_playlist_songs.add(song['id'])
+                    else:
+                        st.session_state.selected_playlist_songs.discard(song['id'])
+                
+                with col2:
+                    if song['image']:
+                        st.image(song['image'], width=60)
+                    else:
+                        st.markdown("🎵")
+                
+                with col3:
+                    st.markdown(f"**{song['name']}**")
+                    st.markdown(f"*{song['artist']}* · {song['album']} · {song['duration']}")
+                
+                st.divider()
+            
+            # Create playlist
+            st.markdown("### ✨ Create New Playlist")
+            new_playlist_name = st.text_input("📝 Playlist Name", value="Copied Playlist", key="pl_name")
+            new_playlist_desc = st.text_area("📄 Description", value="Copied from another playlist", key="pl_desc")
+            
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("✨ Create Playlist", type="primary", use_container_width=True, key="pl_create", disabled=len(st.session_state.selected_playlist_songs) == 0):
+                    if new_playlist_name:
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        try:
+                            selected_tracks = [song for song in st.session_state.playlist_songs if song['id'] in st.session_state.selected_playlist_songs]
+                            track_uris = [song['uri'] for song in selected_tracks]
+                            
+                            playlist_id, playlist_url = create_playlist_with_tracks(
+                                st.session_state.sp,
+                                new_playlist_name,
+                                new_playlist_desc,
+                                track_uris,
+                                progress_bar,
+                                status_text
+                            )
+                            
+                            progress_bar.empty()
+                            status_text.empty()
+                            
+                            st.balloons()
+                            st.success(f"🎉 Created playlist with {len(track_uris)} songs!")
+                            st.markdown(f"### [🎵 Open in Spotify →]({playlist_url})")
+                        except Exception as e:
+                            st.error(f"❌ Error: {str(e)}")
+            
+            with col2:
+                if st.button("🔄 Fetch Another", use_container_width=True, type="secondary", key="pl_reset"):
+                    st.session_state.playlist_songs = []
+                    st.session_state.selected_playlist_songs = set()
+                    st.rerun()
+    
+    # TAB 3: My Playlists
+    with tab3:
+        st.markdown("### 📋 Manage Your Playlists")
+        
+        if st.button("🔄 Refresh Playlists", type="primary"):
+            try:
+                playlists = get_user_playlists(st.session_state.sp)
+                st.session_state.user_playlists = playlists
+                st.success(f"✅ Found {len(playlists)} playlists!")
                 st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error: {str(e)}")
+        
+        if st.session_state.user_playlists:
+            st.markdown(f"### Found {len(st.session_state.user_playlists)} playlists")
+            
+            for playlist in st.session_state.user_playlists:
+                col1, col2 = st.columns([1, 4])
+                
+                with col1:
+                    if playlist['image']:
+                        st.image(playlist['image'], width=100)
+                    else:
+                        st.markdown("🎵")
+                
+                with col2:
+                    st.markdown(f"### {playlist['name']}")
+                    st.markdown(f"**{playlist['tracks_total']} tracks** · {'Public' if playlist['public'] else 'Private'}")
+                    st.markdown(f"[🎵 Open in Spotify]({playlist['url']})")
+                
+                st.divider()
+        else:
+            st.info("👆 Click 'Refresh Playlists' to load your playlists")
 
 else:
     st.markdown("### 👋 Welcome!")
